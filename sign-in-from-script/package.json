@@ -1,0 +1,12 @@
+{
+  "name": "beagle-service-sign-in-from-script",
+  "private": true,
+  "type": "module",
+  "description": "A script that signs in to a site that runs @decentnetwork/beagle-service.",
+  "scripts": {
+    "start": "node sign-in-from-script.mjs"
+  },
+  "dependencies": {
+    "@decentnetwork/peer": "^0.1.178"
+  }
+}

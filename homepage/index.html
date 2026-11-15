@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>My homepage</title>
+<style>
+  body { font: 16px/1.5 system-ui, sans-serif; max-width: 36rem; margin: 3rem auto; padding: 0 1rem; }
+  button, input { font: inherit; padding: .5rem .8rem; margin: .2rem .2rem .2rem 0; }
+  code { word-break: break-all; }
+  small { color: #666; }
+  pre { white-space: pre-wrap; }
+  #error { color: #b00020; }
+</style>
+<h1>My homepage</h1>
+<div id="who">Loading…</div>
+<div id="items"></div>
+<div id="ask"></div>
+<div id="contact"></div>
+<div id="owner"></div>
+<p id="error"></p>
+
+<script type="module">
+import { signIn, readLaunch, addFriend } from "/beagle-connect.js";
+
+// Two doors, one origin each. An https page cannot look for an installed Beagle
+// by itself, so the visitor says which one they use. A Beagle on another local
+// port: open this page with ?beagle=http://127.0.0.1:8767
+const local = new URLSearchParams(location.search).get("beagle");
+const DOORS = {
+  installed: /^http:\/\/(127\.0\.0\.1|localhost):\d+$/.test(local ?? "") ? local : "http://127.0.0.1:8766",
+  web: "https://app.beagle.chat",
+};
+const $ = (id) => document.getElementById(id);
+const fail = (e) => ($("error").textContent = e?.message ?? String(e));
+const api = async (path, body) => {
+  const r = await fetch(path, body ? { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) } : {});
+  return { status: r.status, ...(await r.json()) };
+};
+const el = (tag, props = {}, ...kids) => {
+  const n = Object.assign(document.createElement(tag), props);
+  n.append(...kids);
+  return n;
+};
+
+let attempt = 0;
+async function signInThrough(door) {
+  // Open the window inside the click: one opened after an await has lost the user gesture.
+  const win = window.open("about:blank", "beagle-connect", "width=420,height=560");
+  if (!win) return fail(new Error("Allow pop-ups for this site, then click again."));
+  const mine = ++attempt;
+  try {
+    const { nonce } = await api("/api/auth/nonce");
+    const who = await signIn({ nonce, origins: [DOORS[door]], existingWindow: win });
+    const r = await api("/api/auth/sign-in", who); // { userid, address, name, avatar, sig, nonce, uiOrigin }
+    if (!r.ok) throw new Error(r.message);
+    show();
+  } catch (e) {
+    try { win.close(); } catch {}
+    // An earlier attempt that was abandoned (its window closed) gives up two
+    // minutes later; by then a newer one may have signed in. Only the latest speaks.
+    if (mine === attempt) fail(e);
+  }
+}
+
+async function show() {
+  $("error").textContent = "";
+  const me = await api("/api/auth/me");
+  const page = await api("/api/page");
+  if (page.error) fail(new Error(`This page is not available to you: ${page.error}`));
+
+  // Who you are
+  $("who").replaceChildren(...(me.user
+    ? [
+        el("p", {}, `Signed in as ${me.user.name ?? "someone"} `, el("code", { textContent: me.user.userid }), ` · you see: ${page.level}`),
+        el("button", { textContent: "Sign out", onclick: async () => { await api("/api/auth/logout", {}); show(); } }),
+      ]
+    : [
+        el("button", { textContent: "Sign in with Beagle (installed)", onclick: () => signInThrough("installed") }),
+        el("button", { textContent: "Sign in with Beagle in the browser", onclick: () => signInThrough("web") }),
+      ]));
+
+  // What you may see
+  $("items").replaceChildren(...(page.items ?? []).map((item) =>
+    el("section", {}, el("h2", { textContent: item.title }), el("small", { textContent: item.level }), el("p", { textContent: item.text }))));
+
+  // The assistant and the contact buttons: signed-in visitors only
+  $("ask").replaceChildren();
+  $("contact").replaceChildren();
+  $("owner").replaceChildren();
+  if (!me.user) return;
+
+  const question = el("input", { name: "question", placeholder: "Ask the assistant", size: 30 });
+  const reply = el("pre");
+  const form = el("form", {}, question, el("button", { textContent: "Ask" }));
+  form.onsubmit = async (ev) => {
+    ev.preventDefault();
+    const r = await api("/api/ask", { question: question.value });
+    reply.textContent = r.answer ?? r.error;
+  };
+  $("ask").append(el("h2", { textContent: "Ask" }), form, reply);
+
+  // Send the friend request from the same Beagle the visitor signed in with.
+  const door = /^https?:\/\//.test(me.user.door ?? "") ? [me.user.door] : undefined;
+  const contact = await api("/api/contact");
+  const sent = el("p");
+  const add = (label, to) => el("button", {
+    textContent: label,
+    onclick: () => addFriend({ address: to.address, name: to.name, origins: door })
+      .then(() => (sent.textContent = "Friend request sent. You can chat in your Beagle once it is accepted."))
+      .catch(fail),
+  });
+  if (contact.owner || contact.site) $("contact").append(el("h2", { textContent: "Contact" }));
+  if (contact.owner) $("contact").append(add("Add me on Beagle", contact.owner));
+  if (contact.site) $("contact").append(add("Message this site", contact.site));
+  $("contact").append(sent);
+
+  // The owner's panel: who has signed in, and who is selected
+  if (page.level !== "owner") return;
+  const list = el("ul");
+  const fill = ({ visitors = [] }) => list.replaceChildren(...visitors.map((v) => {
+    const box = el("input", { type: "checkbox", checked: v.selected });
+    box.onchange = async () => fill(await api("/api/visitors", { userid: v.userid, selected: box.checked }));
+    return el("li", {}, el("label", {}, box, ` ${v.name ?? "someone"} `, el("code", { textContent: v.userid })));
+  }));
+  fill(await api("/api/visitors"));
+  $("owner").append(el("h2", { textContent: "Selected visitors" }), list);
+}
+
+// Arrived from Beagle's Apps tab? Then the visitor is signed in already.
+try {
+  const launch = await readLaunch();
+  if (launch) await api("/api/auth/launch", launch);
+} catch (e) { fail(e); }
+show();
+</script>
+</html>

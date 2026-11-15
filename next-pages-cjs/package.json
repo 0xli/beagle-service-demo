@@ -1,0 +1,19 @@
+{
+  "name": "beagle-service-next-pages-cjs",
+  "private": true,
+  "description": "Sign in with Beagle in a CommonJS Next.js pages-router site that also has NextAuth's catch-all.",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "users": "beagle-service users list"
+  },
+  "dependencies": {
+    "@decentnetwork/beagle-connect": "^0.1.2",
+    "@decentnetwork/beagle-service": "^0.3.0",
+    "next": "^15.3.2",
+    "next-auth": "^4.24.14",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  }
+}

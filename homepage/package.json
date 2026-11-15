@@ -1,0 +1,15 @@
+{
+  "name": "beagle-service-homepage",
+  "private": true,
+  "type": "module",
+  "description": "A personal homepage on Beagle identity: sign-in, four access levels, an owner's panel, and the site's own identity that takes messages.",
+  "scripts": {
+    "start": "node server.mjs",
+    "users": "beagle-service users list"
+  },
+  "dependencies": {
+    "@decentnetwork/beagle-connect": "^0.1.2",
+    "@decentnetwork/beagle-service": "^0.3.0",
+    "esbuild": "^0.28.0"
+  }
+}

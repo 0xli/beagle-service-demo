@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Minimal site</title>
+<style>
+  body { font: 16px/1.5 system-ui, sans-serif; max-width: 34rem; margin: 3rem auto; padding: 0 1rem; }
+  button, input { font: inherit; padding: .5rem .8rem; margin: .2rem .2rem .2rem 0; }
+  code { word-break: break-all; }
+  #error { color: #b00020; }
+</style>
+<h1>Minimal site</h1>
+<div id="out">Loading…</div>
+<p id="error"></p>
+
+<script type="module">
+import { signIn, readLaunch, addFriend } from "/beagle-connect.js";
+
+// Two doors, one origin each: an https page cannot probe for an installed
+// Beagle, so the visitor says which one they use. A Beagle on another local
+// port: open this page with ?beagle=http://127.0.0.1:8767
+const local = new URLSearchParams(location.search).get("beagle");
+const DOORS = {
+  installed: /^http:\/\/(127\.0\.0\.1|localhost):\d+$/.test(local ?? "") ? local : "http://127.0.0.1:8766",
+  web: "https://app.beagle.chat",
+};
+const out = document.querySelector("#out");
+const fail = (e) => (document.querySelector("#error").textContent = e?.message ?? String(e));
+const api = async (path, body) => {
+  const r = await fetch(`/api/auth/${path}`, body ? { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) } : {});
+  return { status: r.status, ...(await r.json()) };
+};
+const el = (tag, props = {}, ...kids) => {
+  const n = Object.assign(document.createElement(tag), props);
+  n.append(...kids);
+  return n;
+};
+
+async function signInThrough(door) {
+  // Open the window inside the click: one opened after an await has lost the user gesture.
+  const win = window.open("about:blank", "beagle-connect", "width=420,height=560");
+  if (!win) return fail(new Error("Allow pop-ups for this site, then click again."));
+  try {
+    const { nonce } = await api("nonce");
+    const who = await signIn({ nonce, origins: [DOORS[door]], existingWindow: win });
+    render(await api("sign-in", who)); // { userid, address, name, avatar, sig, nonce, uiOrigin }
+  } catch (e) {
+    try { win.close(); } catch {}
+    fail(e);
+  }
+}
+
+function render(me) {
+  document.querySelector("#error").textContent = "";
+  out.replaceChildren();
+  if (!me.user) {
+    if (me.error && me.error !== "not-signed-in") fail(new Error(me.message));
+    out.append(
+      el("button", { textContent: "Sign in with Beagle (installed)", onclick: () => signInThrough("installed") }),
+      el("button", { textContent: "Sign in with Beagle in the browser", onclick: () => signInThrough("web") }),
+    );
+    return;
+  }
+  const { user, registration, agent } = me;
+  out.append(el("p", {}, `Signed in as ${user.name ?? "someone"} (${user.status}) `, el("code", { textContent: user.userid })));
+  if (registration.missing.length || registration.optional.length) {
+    const form = el("form", {}, el("p", { textContent: registration.due ? "Please register to go on:" : registration.missing.length ? "Register:" : "Your details:" }));
+    for (const f of [...registration.required, ...registration.optional]) {
+      form.append(el("input", { name: f, placeholder: f + (registration.required.includes(f) ? " (required)" : ""), value: user.profile[f] ?? "" }));
+    }
+    form.append(el("button", { textContent: "Save" }));
+    form.onsubmit = async (ev) => {
+      ev.preventDefault();
+      const r = await api("register", { profile: Object.fromEntries(new FormData(form)) });
+      r.ok ? render(r) : fail(new Error(Object.entries(r.fields ?? {}).map(([k, v]) => `${k}: ${v}`).join(", ") || r.message));
+    };
+    out.append(form);
+  }
+  if (agent) out.append(el("button", { textContent: `Add ${agent.name ?? "our agent"} on Beagle`, onclick: () => addFriend({ address: agent.address, name: agent.name }).catch(fail) }));
+  out.append(el("button", { textContent: "Sign out", onclick: async () => { await api("logout", {}); render({}); } }));
+  fetch("/api/hello").then((r) => r.json()).then((j) => out.append(el("p", { textContent: j.message ?? `The site's own route says: ${j.error}` })));
+}
+
+// Arrived from Beagle's Apps tab? Then the visitor is signed in already.
+try {
+  const launch = await readLaunch();
+  if (launch) await api("launch", launch);
+} catch (e) { fail(e); }
+render(await api("me"));
+</script>
+</html>

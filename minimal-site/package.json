@@ -1,0 +1,15 @@
+{
+  "name": "beagle-service-minimal-site",
+  "private": true,
+  "type": "module",
+  "description": "A whole site on Beagle identity in one file: sign-in, registration fields, a route of the site's own.",
+  "scripts": {
+    "start": "node server.mjs",
+    "users": "beagle-service users list"
+  },
+  "dependencies": {
+    "@decentnetwork/beagle-connect": "^0.1.2",
+    "@decentnetwork/beagle-service": "^0.3.0",
+    "esbuild": "^0.28.0"
+  }
+}
